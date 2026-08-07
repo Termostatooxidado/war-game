@@ -1,0 +1,1987 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>WAR v0.7.0 - Con Animaciones</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap');
+
+  :root {
+    --bg:       #0a0a0c;
+    --surface:  #12121a;
+    --border:   #2a2a3a;
+    --accent:   #c8a84b;
+    --accent2:  #8b2020;
+    --text:     #d4cfc5;
+    --dim:      #6b6660;
+    --panel-w:  280px;
+    --header-h: 52px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Crimson Text', serif;
+    touch-action: none;
+  }
+
+  #app {
+    display: grid;
+    width: 100vw;
+    height: 100vh;
+    grid-template-rows: var(--header-h) 1fr;
+    grid-template-columns: 1fr var(--panel-w);
+    grid-template-areas:
+      "header header"
+      "map    panel";
+  }
+
+  @media (max-width: 700px) {
+    :root { --panel-w: 100%; --header-h: 48px; }
+    #app {
+      grid-template-columns: 1fr;
+      grid-template-rows: var(--header-h) 1fr 220px;
+      grid-template-areas:
+        "header"
+        "map"
+        "panel";
+    }
+  }
+
+  #header {
+    grid-area: header;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 10px;
+    z-index: 10;
+  }
+  #header h1 {
+    font-family: 'Cinzel', serif;
+    font-size: clamp(13px, 3vw, 18px);
+    color: var(--accent);
+    letter-spacing: 4px;
+    flex-shrink: 0;
+  }
+  #turn-info {
+    flex: 1;
+    font-size: 12px;
+    color: var(--dim);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #phase-badge {
+    font-family: 'Cinzel', serif;
+    font-size: 10px;
+    letter-spacing: 2px;
+    padding: 3px 8px;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 2px;
+    flex-shrink: 0;
+    transition: all 0.5s ease;
+  }
+  #phase-badge.pulse {
+    animation: badge-pulse 0.8s ease-in-out;
+  }
+  @keyframes badge-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.15); background: rgba(200,168,75,0.2); }
+  }
+
+  #map-container {
+    grid-area: map;
+    position: relative;
+    overflow: hidden;
+    background: #080810;
+    background-image:
+      radial-gradient(ellipse at 30% 40%, #0d1525 0%, transparent 60%),
+      radial-gradient(ellipse at 70% 60%, #0d1520 0%, transparent 50%);
+    cursor: grab;
+  }
+  #map-container:active { cursor: grabbing; }
+
+  #map-viewport {
+    position: absolute;
+    top: 0; left: 0;
+    transform-origin: 0 0;
+    will-change: transform;
+  }
+
+  #zoom-controls {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 20;
+  }
+  .zoom-btn {
+    width: 36px; height: 36px;
+    background: rgba(18,18,26,0.92);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s;
+  }
+  .zoom-btn:active { background: #1e1e2e; }
+  #btn-reset-zoom {
+    font-size: 10px;
+    font-family: 'Cinzel', serif;
+    letter-spacing: 1px;
+  }
+
+  /* ── ANIMACIONES DE TERRITORIOS ── */
+  .territory {
+    cursor: pointer;
+    transition: filter 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .territory polygon, .territory path, .territory rect {
+    stroke-width: 1.2;
+    transition: fill 0.3s ease, stroke 0.3s ease;
+  }
+  .territory:hover polygon,
+  .territory:hover path,
+  .territory:hover rect { filter: brightness(1.35); }
+
+  .territory.selected polygon,
+  .territory.selected path,
+  .territory.selected rect {
+    stroke: #ffffff !important;
+    stroke-width: 2.5 !important;
+    filter: brightness(1.5);
+    animation: selected-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes selected-pulse {
+    0%, 100% { filter: brightness(1.5); }
+    50% { filter: brightness(2); }
+  }
+
+  .territory.target polygon,
+  .territory.target path,
+  .territory.target rect {
+    stroke: #ff4444 !important;
+    stroke-width: 2.5 !important;
+    animation: target-pulse 0.8s ease-in-out infinite alternate;
+  }
+  @keyframes target-pulse {
+    from { filter: brightness(1); }
+    to   { filter: brightness(1.8); }
+  }
+
+  .territory.conquered polygon,
+  .territory.conquered path,
+  .territory.conquered rect {
+    animation: conquer-flash 0.6s ease-out;
+  }
+  @keyframes conquer-flash {
+    0% { filter: brightness(3); stroke: #ffdd44; stroke-width: 4; }
+    50% { filter: brightness(2); stroke: #ffdd44; stroke-width: 3; }
+    100% { filter: brightness(1); stroke-width: 1.2; }
+  }
+
+  .terr-label {
+    font-family: 'Cinzel', serif;
+    font-size: 7px;
+    fill: rgba(255,255,255,0.85);
+    pointer-events: none;
+    text-anchor: middle;
+    dominant-baseline: central;
+    text-shadow: 0 0 4px #000;
+    transition: opacity 0.3s;
+  }
+  .terr-troops {
+    font-family: 'Cinzel', serif;
+    font-size: 9px;
+    font-weight: 700;
+    fill: #fff;
+    pointer-events: none;
+    text-anchor: middle;
+    dominant-baseline: central;
+  }
+  .troops-bg {
+    fill: rgba(0,0,0,0.65);
+    rx: 6; ry: 6;
+    transition: all 0.3s ease;
+  }
+  .troops-bg.pop {
+    animation: pop-bg 0.4s ease-out;
+  }
+  @keyframes pop-bg {
+    0% { transform: scale(1.5); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  #panel {
+    grid-area: panel;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 5;
+  }
+  @media (max-width: 700px) {
+    #panel { border-left: none; border-top: 1px solid var(--border); }
+  }
+
+  #panel-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .ptab {
+    flex: 1;
+    padding: 8px 4px;
+    font-family: 'Cinzel', serif;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-align: center;
+    color: var(--dim);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .ptab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  .panel-section { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+  .panel-section.active { display: flex; }
+
+  #action-area {
+    padding: 10px;
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .info-box {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .info-box .label {
+    font-family: 'Cinzel', serif;
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-val { color: var(--accent); font-weight: 600; }
+
+  .btn {
+    width: 100%;
+    padding: 9px;
+    font-family: 'Cinzel', serif;
+    font-size: 10px;
+    letter-spacing: 2px;
+    border: 1px solid var(--border);
+    background: rgba(0,0,0,0.4);
+    color: var(--text);
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn:hover, .btn:active { background: rgba(200,168,75,0.15); border-color: var(--accent); color: var(--accent); }
+  .btn.primary { border-color: var(--accent); color: var(--accent); background: rgba(200,168,75,0.08); }
+  .btn.primary:not(:disabled):hover { background: rgba(200,168,75,0.2); }
+  .btn.danger  { border-color: #cc4444; color: #cc4444; background: rgba(204,68,68,0.08); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  .hint-text {
+    font-size: 11px;
+    color: var(--dim);
+    font-style: italic;
+    text-align: center;
+    line-height: 1.5;
+    transition: all 0.3s;
+  }
+
+  /* ── ANIMACIONES DE DADOS ── */
+  #dice-area {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    min-height: 50px;
+    padding: 4px;
+  }
+  .die {
+    width: 36px; 
+    height: 36px;
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Cinzel', serif;
+    font-size: 16px;
+    font-weight: 700;
+    transition: all 0.3s;
+    position: relative;
+  }
+  .die.rolling {
+    animation: roll-die 0.6s ease-out;
+  }
+  @keyframes roll-die {
+    0% { transform: rotateX(0deg) rotateY(0deg) scale(0.5); opacity: 0; }
+    30% { transform: rotateX(360deg) rotateY(180deg) scale(1.5); opacity: 1; }
+    60% { transform: rotateX(720deg) rotateY(360deg) scale(1.2); }
+    100% { transform: rotateX(720deg) rotateY(360deg) scale(1); opacity: 1; }
+  }
+  .die.atk { border-color: #cc4444; color: #cc4444; }
+  .die.def { border-color: #5b9fd4; color: #5b9fd4; }
+  .die.win { 
+    background: rgba(100,200,100,0.2);
+    animation: win-flash 0.5s ease-out;
+  }
+  .die.lose { 
+    background: rgba(200,50,50,0.2);
+    animation: lose-flash 0.5s ease-out;
+  }
+  @keyframes win-flash {
+    0%, 100% { background: rgba(100,200,100,0.2); }
+    50% { background: rgba(100,200,100,0.5); box-shadow: 0 0 20px rgba(100,200,100,0.3); }
+  }
+  @keyframes lose-flash {
+    0%, 100% { background: rgba(200,50,50,0.2); }
+    50% { background: rgba(200,50,50,0.5); box-shadow: 0 0 20px rgba(200,50,50,0.3); }
+  }
+
+  #dice-vs { 
+    font-family: 'Cinzel', serif; 
+    font-size: 10px; 
+    color: var(--dim); 
+    width: 100%; 
+    text-align: center;
+    animation: fade-in 0.5s ease-out;
+  }
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  #log-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .log-entry {
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 3px 6px;
+    border-radius: 2px;
+    background: rgba(0,0,0,0.2);
+    animation: log-in 0.3s ease-out;
+  }
+  @keyframes log-in { 
+    from { opacity:0; transform: translateX(-8px); } 
+    to { opacity:1; transform: translateX(0); } 
+  }
+  .log-entry.battle { color: #e87070; }
+  .log-entry.conquer { color: #70c070; }
+  .log-entry.ai { color: #8888cc; }
+  .log-entry.system { color: var(--accent); font-family: 'Cinzel', serif; font-size: 9px; letter-spacing: 1px; }
+
+  ::-webkit-scrollbar { width: 3px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  #modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100;
+    display: none;
+  }
+  #modal-box {
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 24px;
+    max-width: 360px;
+    width: 90%;
+    text-align: center;
+    animation: modal-in 0.4s ease-out;
+  }
+  @keyframes modal-in {
+    from { transform: scale(0.8); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  #modal-box h2 {
+    font-family: 'Cinzel', serif;
+    color: var(--accent);
+    font-size: 20px;
+    margin-bottom: 12px;
+  }
+  #modal-box p { font-size: 13px; margin-bottom: 16px; color: var(--dim); }
+  #modal-close {
+    padding: 8px 24px;
+    font-family: 'Cinzel', serif;
+    font-size: 11px;
+    letter-spacing: 2px;
+    border: 1px solid var(--accent);
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.2s;
+  }
+  #modal-close:hover { background: rgba(200,168,75,0.1); }
+
+  #legend {
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    overflow-y: auto;
+  }
+  .leg-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    padding: 3px 0;
+  }
+  .leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .leg-bonus { margin-left: auto; color: var(--accent); font-family: 'Cinzel', serif; font-size: 10px; }
+
+  #setup-screen {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.92);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200;
+  }
+  #setup-box {
+    background: var(--surface);
+    border: 2px solid var(--accent);
+    border-radius: 8px;
+    padding: 32px;
+    max-width: 400px;
+    width: 90%;
+    animation: modal-in 0.5s ease-out;
+  }
+  #setup-box h1 {
+    font-family: 'Cinzel', serif;
+    color: var(--accent);
+    font-size: 28px;
+    text-align: center;
+    letter-spacing: 6px;
+    margin-bottom: 8px;
+  }
+  #setup-box .sub {
+    text-align: center;
+    color: var(--dim);
+    font-size: 13px;
+    margin-bottom: 24px;
+  }
+  .setup-group {
+    margin-bottom: 16px;
+  }
+  .setup-group label {
+    display: block;
+    font-family: 'Cinzel', serif;
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+  .setup-group input, .setup-group select {
+    width: 100%;
+    padding: 8px 10px;
+    background: rgba(0,0,0,0.5);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: 'Crimson Text', serif;
+    font-size: 14px;
+  }
+  .setup-group input:focus, .setup-group select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .setup-group select option {
+    background: var(--bg);
+  }
+  #btn-start {
+    width: 100%;
+    padding: 12px;
+    font-family: 'Cinzel', serif;
+    font-size: 13px;
+    letter-spacing: 3px;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-weight: 700;
+  }
+  #btn-start:hover { opacity: 0.85; transform: scale(1.02); }
+  .difficulty-desc {
+    font-size: 11px;
+    color: var(--dim);
+    margin-top: 4px;
+    font-style: italic;
+  }
+
+  /* ── ANIMACIONES DE PARTICULAS ── */
+  .particle-container {
+    position: absolute;
+    pointer-events: none;
+    z-index: 30;
+  }
+  .particle {
+    position: absolute;
+    border-radius: 50%;
+    animation: particle-fly 0.8s ease-out forwards;
+  }
+  @keyframes particle-fly {
+    0% { transform: translate(0, 0) scale(1); opacity: 1; }
+    100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
+  }
+
+  /* ── ANIMACION DE TROPAS MOVIENDOSE ── */
+  .moving-troops {
+    position: absolute;
+    pointer-events: none;
+    z-index: 25;
+    font-family: 'Cinzel', serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 0 10px rgba(200,168,75,0.5);
+    animation: troops-move 0.8s ease-in-out forwards;
+  }
+  @keyframes troops-move {
+    0% { transform: scale(0.5); opacity: 0; }
+    30% { transform: scale(1.5); opacity: 1; }
+    70% { transform: scale(1.2); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+</style>
+</head>
+<body>
+
+<!-- SETUP SCREEN -->
+<div id="setup-screen">
+  <div id="setup-box">
+    <h1>⚔ WAR</h1>
+    <p class="sub">Conquista el mundo</p>
+    <div class="setup-group">
+      <label>TU NOMBRE</label>
+      <input type="text" id="player-name" value="Comandante" maxlength="20">
+    </div>
+    <div class="setup-group">
+      <label>DIFICULTAD IA</label>
+      <select id="ai-difficulty">
+        <option value="easy">Fácil</option>
+        <option value="normal" selected>Normal</option>
+        <option value="hard">Difícil</option>
+      </select>
+      <div class="difficulty-desc" id="diff-desc">IA con estrategia equilibrada</div>
+    </div>
+    <button id="btn-start">COMENZAR GUERRA</button>
+  </div>
+</div>
+
+<div id="app">
+
+  <header id="header">
+    <h1>WAR</h1>
+    <div id="turn-info">Cargando...</div>
+    <div id="phase-badge">REFUERZO</div>
+  </header>
+
+  <div id="map-container">
+    <div id="map-viewport">
+      <svg id="map-svg" viewBox="0 0 800 480" xmlns="http://www.w3.org/2000/svg"
+           style="display:block; width:800px; height:480px;">
+        <rect width="800" height="480" fill="#080e18"/>
+        <defs>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M40,0 L0,0 0,40" fill="none" stroke="rgba(255,255,255,0.02)" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="800" height="480" fill="url(#grid)"/>
+        <g id="territories-layer"></g>
+        <g id="labels-layer"></g>
+        <g id="connections-layer"></g>
+        <g id="animation-layer"></g>
+      </svg>
+    </div>
+
+    <div id="zoom-controls">
+      <div class="zoom-btn" id="btn-zoom-in">+</div>
+      <div class="zoom-btn" id="btn-zoom-out">-</div>
+      <div class="zoom-btn" id="btn-reset-zoom">FIT</div>
+    </div>
+  </div>
+
+  <div id="panel">
+    <div id="panel-tabs">
+      <div class="ptab active" data-tab="actions">ACCION</div>
+      <div class="ptab" data-tab="status">ESTADO</div>
+      <div class="ptab" data-tab="log">BITACORA</div>
+      <div class="ptab" data-tab="legend">MAPA</div>
+    </div>
+
+    <div class="panel-section active" id="tab-actions">
+      <div id="action-area">
+        <div class="info-box" id="selection-info">
+          <span class="label">SELECCION</span>
+          <span id="sel-text">Ninguno</span>
+        </div>
+
+        <div class="info-box" id="phase-info">
+          <span class="label">FASE</span>
+          <span id="phase-desc">Selecciona un territorio para reforzar</span>
+        </div>
+
+        <div id="troops-slider-wrap" style="display:none">
+          <div class="info-box">
+            <span class="label">TROPAS A MOVER</span>
+            <input type="range" id="troops-slider" min="1" max="1" value="1"
+                   style="width:100%;accent-color:var(--accent);margin-top:4px">
+            <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:2px">
+              <span>1</span>
+              <span id="slider-val" style="color:var(--accent);font-weight:700">1</span>
+              <span id="slider-max">1</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="dice-area" style="display:none"></div>
+        <div id="dice-vs" style="display:none"></div>
+
+        <button class="btn primary" id="btn-action" disabled>SELECCIONA TERRITORIO</button>
+        <button class="btn" id="btn-next-phase">SIGUIENTE FASE</button>
+        <button class="btn danger" id="btn-end-turn" style="display:none">TERMINAR TURNO</button>
+
+        <p class="hint-text" id="hint-text">Haz clic en un territorio propio para comenzar</p>
+      </div>
+    </div>
+
+    <div class="panel-section" id="tab-status">
+      <div id="action-area" style="overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px">
+        <div class="info-box" id="player-stats"></div>
+        <div class="info-box" id="continent-control"></div>
+      </div>
+    </div>
+
+    <div class="panel-section" id="tab-log">
+      <div id="log-area"></div>
+    </div>
+
+    <div class="panel-section" id="tab-legend">
+      <div id="legend"></div>
+    </div>
+  </div>
+</div>
+
+<div id="modal-overlay">
+  <div id="modal-box">
+    <h2 id="modal-title">Titulo</h2>
+    <p id="modal-body">Cuerpo</p>
+    <button id="modal-close">CERRAR</button>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   WAR v0.7.0 — Con Animaciones Completas
+   ============================================================ */
+
+const CONTINENTS = {
+  NA: { name: 'Norteamerica', bonus: 5, color: '#1a3a5c' },
+  SA: { name: 'Sudamerica',   bonus: 2, color: '#1a4a2a' },
+  EU: { name: 'Europa',       bonus: 5, color: '#3a2a5c' },
+  AF: { name: 'Africa',       bonus: 3, color: '#4a2a1a' },
+  AS: { name: 'Asia',         bonus: 7, color: '#3a3a1a' },
+  OC: { name: 'Oceania',      bonus: 2, color: '#1a3a3a' },
+};
+
+const TERRITORIES_DATA = {
+  alaska:       { name:'Alaska',         cont:'NA', cx: 52,  cy: 60,  w:70, h:44 },
+  nw_territory: { name:'NW Territory',   cont:'NA', cx: 130, cy: 55,  w:70, h:40 },
+  greenland:    { name:'Greenland',      cont:'NA', cx: 225, cy: 35,  w:65, h:42 },
+  alberta:      { name:'Alberta',        cont:'NA', cx: 100, cy: 100, w:60, h:40 },
+  ontario:      { name:'Ontario',        cont:'NA', cx: 162, cy: 98,  w:58, h:40 },
+  quebec:       { name:'Quebec',         cont:'NA', cx: 218, cy: 95,  w:52, h:40 },
+  w_us:         { name:'W. EEUU',        cont:'NA', cx: 100, cy: 145, w:62, h:40 },
+  e_us:         { name:'E. EEUU',        cont:'NA', cx: 162, cy: 143, w:60, h:40 },
+  central_am:   { name:'C. America',     cont:'NA', cx: 120, cy: 192, w:58, h:36 },
+  venezuela:    { name:'Venezuela',      cont:'SA', cx: 165, cy: 235, w:58, h:36 },
+  peru:         { name:'Peru',           cont:'SA', cx: 148, cy: 278, w:52, h:38 },
+  brazil:       { name:'Brasil',         cont:'SA', cx: 208, cy: 265, w:62, h:50 },
+  argentina:    { name:'Argentina',      cont:'SA', cx: 170, cy: 325, w:55, h:48 },
+  iceland:      { name:'Islandia',       cont:'EU', cx: 292, cy: 48,  w:50, h:36 },
+  great_britain:{ name:'Gran Bretana',   cont:'EU', cx: 290, cy: 95,  w:48, h:42 },
+  w_europe:     { name:'W. Europa',      cont:'EU', cx: 300, cy: 148, w:52, h:40 },
+  n_europe:     { name:'N. Europa',      cont:'EU', cx: 348, cy: 95,  w:50, h:40 },
+  s_europe:     { name:'S. Europa',      cont:'EU', cx: 346, cy: 148, w:52, h:40 },
+  ukraine:      { name:'Ucrania',        cont:'EU', cx: 400, cy: 98,  w:58, h:54 },
+  n_africa:     { name:'N. Africa',      cont:'AF', cx: 308, cy: 218, w:62, h:46 },
+  egypt:        { name:'Egipto',         cont:'AF', cx: 375, cy: 210, w:52, h:40 },
+  e_africa:     { name:'E. Africa',      cont:'AF', cx: 390, cy: 260, w:52, h:44 },
+  congo:        { name:'Congo',          cont:'AF', cx: 340, cy: 268, w:52, h:42 },
+  s_africa:     { name:'S. Africa',      cont:'AF', cx: 352, cy: 316, w:54, h:44 },
+  madagascar:   { name:'Madagascar',     cont:'AF', cx: 420, cy: 314, w:42, h:40 },
+  ural:         { name:'Ural',           cont:'AS', cx: 472, cy: 62,  w:52, h:44 },
+  siberia:      { name:'Siberia',        cont:'AS', cx: 535, cy: 55,  w:58, h:42 },
+  yakutsk:      { name:'Yakutsk',        cont:'AS', cx: 602, cy: 52,  w:54, h:40 },
+  kamchatka:    { name:'Kamchatka',      cont:'AS', cx: 662, cy: 58,  w:52, h:46 },
+  afghanistan:  { name:'Afghanistan',    cont:'AS', cx: 470, cy: 115, w:55, h:42 },
+  china:        { name:'China',          cont:'AS', cx: 562, cy: 135, w:65, h:52 },
+  mongolia:     { name:'Mongolia',       cont:'AS', cx: 608, cy: 100, w:58, h:40 },
+  japan:        { name:'Japon',          cont:'AS', cx: 672, cy: 115, w:44, h:38 },
+  irkutsk:      { name:'Irkutsk',        cont:'AS', cx: 588, cy: 92,  w:48, h:36 },
+  middle_east:  { name:'Medio Oriente',  cont:'AS', cx: 432, cy: 168, w:58, h:44 },
+  india:        { name:'India',          cont:'AS', cx: 508, cy: 172, w:52, h:50 },
+  siam:         { name:'Siam',           cont:'AS', cx: 588, cy: 188, w:50, h:44 },
+  indonesia:    { name:'Indonesia',      cont:'OC', cx: 620, cy: 250, w:58, h:40 },
+  new_guinea:   { name:'Nueva Guinea',   cont:'OC', cx: 680, cy: 248, w:52, h:36 },
+  w_australia:  { name:'W. Australia',   cont:'OC', cx: 634, cy: 305, w:56, h:44 },
+  e_australia:  { name:'E. Australia',   cont:'OC', cx: 695, cy: 308, w:52, h:46 },
+};
+
+const ADJACENCY = {
+  alaska:        ['nw_territory','alberta','kamchatka'],
+  nw_territory:  ['alaska','alberta','ontario','greenland'],
+  greenland:     ['nw_territory','ontario','quebec','iceland'],
+  alberta:       ['alaska','nw_territory','ontario','w_us'],
+  ontario:       ['nw_territory','greenland','alberta','quebec','w_us','e_us'],
+  quebec:        ['greenland','ontario','e_us'],
+  w_us:          ['alberta','ontario','e_us','central_am'],
+  e_us:          ['ontario','quebec','w_us','central_am'],
+  central_am:    ['w_us','e_us','venezuela'],
+  venezuela:     ['central_am','peru','brazil'],
+  peru:          ['venezuela','brazil','argentina'],
+  brazil:        ['venezuela','peru','argentina','n_africa'],
+  argentina:     ['peru','brazil'],
+  iceland:       ['greenland','great_britain','n_europe'],
+  great_britain: ['iceland','w_europe','n_europe'],
+  w_europe:      ['great_britain','n_europe','s_europe','n_africa'],
+  n_europe:      ['iceland','great_britain','w_europe','s_europe','ukraine'],
+  s_europe:      ['w_europe','n_europe','ukraine','middle_east','egypt','n_africa'],
+  ukraine:       ['n_europe','s_europe','ural','afghanistan','middle_east'],
+  n_africa:      ['brazil','w_europe','s_europe','egypt','e_africa','congo'],
+  egypt:         ['s_europe','n_africa','middle_east','e_africa'],
+  e_africa:      ['egypt','n_africa','congo','s_africa','madagascar','middle_east'],
+  congo:         ['n_africa','e_africa','s_africa'],
+  s_africa:      ['congo','e_africa','madagascar'],
+  madagascar:    ['s_africa','e_africa'],
+  ural:          ['ukraine','afghanistan','china','siberia'],
+  siberia:       ['ural','china','mongolia','yakutsk','irkutsk'],
+  yakutsk:       ['siberia','irkutsk','kamchatka'],
+  kamchatka:     ['yakutsk','mongolia','japan','alaska'],
+  afghanistan:   ['ukraine','ural','china','india','middle_east'],
+  china:         ['afghanistan','ural','siberia','mongolia','siam','india'],
+  mongolia:      ['china','siberia','irkutsk','kamchatka','japan'],
+  japan:         ['mongolia','kamchatka'],
+  irkutsk:       ['siberia','yakutsk','kamchatka','mongolia'],
+  middle_east:   ['ukraine','s_europe','egypt','e_africa','afghanistan','india'],
+  india:         ['middle_east','afghanistan','china','siam'],
+  siam:          ['india','china','indonesia'],
+  indonesia:     ['siam','new_guinea','w_australia'],
+  new_guinea:    ['indonesia','w_australia','e_australia'],
+  w_australia:   ['indonesia','new_guinea','e_australia'],
+  e_australia:   ['new_guinea','w_australia'],
+};
+
+let PLAYERS = [];
+let state = {};
+let aiDifficulty = 'normal';
+let mapScale = 1, mapX = 0, mapY = 0;
+let isDragging = false, dragStart = {x:0,y:0}, dragOrigin = {x:0,y:0};
+let lastPinchDist = null;
+let isAITurnRunning = false;
+let gameOver = false;
+let pendingFortify = null;
+
+const MAP_W = 800, MAP_H = 480;
+
+// ── SISTEMA DE ANIMACIONES ──────────────────────────────────
+
+function animateTroops(fromId, toId, count) {
+  const from = TERRITORIES_DATA[fromId];
+  const to = TERRITORIES_DATA[toId];
+  const container = document.getElementById('map-container');
+  const viewport = document.getElementById('map-viewport');
+  
+  // Obtener coordenadas en pantalla
+  const fromRect = { x: from.cx * mapScale + mapX, y: from.cy * mapScale + mapY };
+  const toRect = { x: to.cx * mapScale + mapX, y: to.cy * mapScale + mapY };
+  
+  const el = document.createElement('div');
+  el.className = 'moving-troops';
+  el.textContent = `⚔ ${count}`;
+  el.style.left = fromRect.x + 'px';
+  el.style.top = fromRect.y + 'px';
+  el.style.transform = `translate(-50%, -50%)`;
+  
+  // Animación con keyframes personalizados
+  const dx = toRect.x - fromRect.x;
+  const dy = toRect.y - fromRect.y;
+  el.animate([
+    { transform: 'translate(-50%, -50%) scale(0.5)', opacity: 0 },
+    { transform: 'translate(-50%, -50%) scale(1.5)', opacity: 1, offset: 0.3 },
+    { transform: `translate(${dx/2}px, ${dy/2}px) scale(1.3)`, opacity: 1, offset: 0.6 },
+    { transform: `translate(${dx}px, ${dy}px) scale(1)`, opacity: 1, offset: 0.85 },
+    { transform: `translate(${dx}px, ${dy}px) scale(0.8)`, opacity: 0 }
+  ], {
+    duration: 800,
+    easing: 'ease-in-out'
+  });
+  
+  container.appendChild(el);
+  setTimeout(() => el.remove(), 900);
+}
+
+function spawnParticles(x, y, color, count = 20) {
+  const container = document.getElementById('map-container');
+  const frag = document.createDocumentFragment();
+  
+  for(let i = 0; i < count; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    const size = 4 + Math.random() * 8;
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 30 + Math.random() * 80;
+    p.style.width = size + 'px';
+    p.style.height = size + 'px';
+    p.style.background = color || `hsl(${Math.random() * 60 + 30}, 80%, 60%)`;
+    p.style.left = x + 'px';
+    p.style.top = y + 'px';
+    p.style.setProperty('--tx', Math.cos(angle) * dist + 'px');
+    p.style.setProperty('--ty', Math.sin(angle) * dist + 'px');
+    p.style.animationDuration = (0.4 + Math.random() * 0.6) + 's';
+    frag.appendChild(p);
+  }
+  
+  container.appendChild(frag);
+  setTimeout(() => {
+    container.querySelectorAll('.particle').forEach(el => el.remove());
+  }, 1000);
+}
+
+function animateConquest(id) {
+  const g = document.querySelector(`.territory[data-id="${id}"]`);
+  if(g) {
+    g.classList.add('conquered');
+    setTimeout(() => g.classList.remove('conquered'), 600);
+  }
+  
+  // Partículas en el centro del territorio
+  const td = TERRITORIES_DATA[id];
+  const rect = document.getElementById('map-container').getBoundingClientRect();
+  const x = td.cx * mapScale + mapX;
+  const y = td.cy * mapScale + mapY;
+  spawnParticles(x, y, '#ffdd44', 25);
+}
+
+function animateTroopCount(id) {
+  const bg = document.querySelector(`.territory[data-id="${id}"] .troops-bg`);
+  if(bg) {
+    bg.classList.remove('pop');
+    // Forzar reflow
+    void bg.offsetWidth;
+    bg.classList.add('pop');
+  }
+}
+
+function animateDice(rolls, type) {
+  const diceArea = document.getElementById('dice-area');
+  const dice = diceArea.querySelectorAll('.die');
+  dice.forEach((d, i) => {
+    d.classList.remove('rolling');
+    void d.offsetWidth;
+    d.classList.add('rolling');
+    // Delay escalonado
+    d.style.animationDelay = (i * 0.1) + 's';
+  });
+}
+
+// ── SETUP ────────────────────────────────────────────────────
+
+function setupGame() {
+  const nameInput = document.getElementById('player-name');
+  const diffSelect = document.getElementById('ai-difficulty');
+  const diffDesc = document.getElementById('diff-desc');
+
+  const diffMap = {
+    easy: 'IA con estrategia básica y pocos ataques',
+    normal: 'IA con estrategia equilibrada',
+    hard: 'IA agresiva con ataques frecuentes'
+  };
+  diffSelect.addEventListener('change', () => {
+    diffDesc.textContent = diffMap[diffSelect.value] || '';
+    aiDifficulty = diffSelect.value;
+  });
+
+  document.getElementById('btn-start').addEventListener('click', () => {
+    const playerName = nameInput.value.trim() || 'Comandante';
+    const diff = diffSelect.value;
+    aiDifficulty = diff;
+    document.getElementById('setup-screen').style.display = 'none';
+    initGame(playerName, diff);
+  });
+
+  document.getElementById('player-name').addEventListener('keydown', (e) => {
+    if(e.key === 'Enter') document.getElementById('btn-start').click();
+  });
+}
+
+function initGame(playerName, diff) {
+  PLAYERS = [
+    { id:0, name: playerName, color:'#2a6496', dark:'#1a3a5c', isHuman:true },
+    { id:1, name:'Rojo', color:'#8b2020', dark:'#4a0a0a', isHuman:false },
+    { id:2, name:'Verde', color:'#1a6b2a', dark:'#0a3a0a', isHuman:false },
+    { id:3, name:'Bronce', color:'#7a4a00', dark:'#3a2000', isHuman:false },
+  ];
+
+  state = {
+    territories: {},
+    currentPlayer: 0,
+    phase: 'reinforce',
+    reinforcementsLeft: 0,
+    selected: null,
+    target: null,
+    turn: 0,
+  };
+  gameOver = false;
+  isAITurnRunning = false;
+  pendingFortify = null;
+
+  const ids = Object.keys(TERRITORIES_DATA);
+  const shuffled = [...ids].sort(() => Math.random() - 0.5);
+  const perPlayer = Math.floor(shuffled.length / PLAYERS.length);
+
+  for(const id of ids) {
+    state.territories[id] = { owner: -1, troops: 0 };
+  }
+
+  PLAYERS.forEach((p, i) => {
+    const slice = shuffled.slice(i * perPlayer, (i+1) * perPlayer);
+    slice.forEach(id => {
+      state.territories[id] = { owner: i, troops: 3 };
+    });
+  });
+  const remainder = shuffled.slice(PLAYERS.length * perPlayer);
+  remainder.forEach((id, i) => {
+    state.territories[id] = { owner: i % PLAYERS.length, troops: 3 };
+  });
+
+  state.currentPlayer = 0;
+  state.phase = 'reinforce';
+  state.reinforcementsLeft = calcReinforcements(0);
+  state.selected = null;
+  state.target = null;
+
+  buildSVG();
+  buildLegend();
+  updateUI();
+  clearLog();
+  log('⚔ GUERRA INICIADA', 'system');
+  log(`Tu turno — +${state.reinforcementsLeft} tropas para reforzar`, 'system');
+  updateMapVisuals();
+  fitMap();
+  
+  // Animación de entrada
+  document.getElementById('phase-badge').classList.add('pulse');
+  setTimeout(() => {
+    document.getElementById('phase-badge').classList.remove('pulse');
+  }, 800);
+}
+
+// ── MAP CONTROLS ────────────────────────────────────────────
+
+function setTransform(x,y,s, animate=false) {
+  const vp = document.getElementById('map-viewport');
+  if(animate) vp.style.transition = 'transform 0.3s ease';
+  else vp.style.transition = 'none';
+  mapX = x; mapY = y; mapScale = s;
+  vp.style.transform = `translate(${x}px,${y}px) scale(${s})`;
+  if(animate) setTimeout(()=>{ vp.style.transition='none'; }, 350);
+}
+
+function clampTransform(x,y,s) {
+  const cont = document.getElementById('map-container');
+  const cw = cont.clientWidth, ch = cont.clientHeight;
+  const scaledW = MAP_W * s, scaledH = MAP_H * s;
+  const px = scaledW * 0.2, py = scaledH * 0.2;
+  x = Math.min(px, Math.max(cw - scaledW - px, x));
+  y = Math.min(py, Math.max(ch - scaledH - py, y));
+  return {x,y};
+}
+
+function fitMap() {
+  const cont = document.getElementById('map-container');
+  const cw = cont.clientWidth, ch = cont.clientHeight;
+  const s = Math.min(cw / MAP_W, ch / MAP_H) * 0.96;
+  const x = (cw - MAP_W * s) / 2;
+  const y = (ch - MAP_H * s) / 2;
+  setTransform(x, y, s, true);
+}
+
+function setupMapControls() {
+  const cont = document.getElementById('map-container');
+
+  cont.addEventListener('mousedown', e => {
+    if(e.target.closest('.territory') || e.target.closest('.zoom-btn')) return;
+    isDragging = true;
+    dragStart = {x: e.clientX, y: e.clientY};
+    dragOrigin = {x: mapX, y: mapY};
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if(!isDragging) return;
+    const dx = e.clientX - dragStart.x, dy = e.clientY - dragStart.y;
+    const c = clampTransform(dragOrigin.x + dx, dragOrigin.y + dy, mapScale);
+    setTransform(c.x, c.y, mapScale);
+  });
+  window.addEventListener('mouseup', () => { isDragging = false; });
+
+  cont.addEventListener('wheel', e => {
+    e.preventDefault();
+    const rect = cont.getBoundingClientRect();
+    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+    const delta = e.deltaY < 0 ? 1.12 : 0.88;
+    const ns = Math.min(3, Math.max(0.3, mapScale * delta));
+    const nx = cx - (cx - mapX) * (ns/mapScale);
+    const ny = cy - (cy - mapY) * (ns/mapScale);
+    const c = clampTransform(nx, ny, ns);
+    setTransform(c.x, c.y, ns);
+  }, {passive:false});
+
+  cont.addEventListener('touchstart', e => {
+    if(e.touches.length === 1) {
+      const t = e.touches[0];
+      isDragging = true;
+      dragStart = {x: t.clientX, y: t.clientY};
+      dragOrigin = {x: mapX, y: mapY};
+      lastPinchDist = null;
+    } else if(e.touches.length === 2) {
+      isDragging = false;
+      lastPinchDist = pinchDist(e.touches);
+    }
+    e.preventDefault();
+  }, {passive:false});
+
+  cont.addEventListener('touchmove', e => {
+    if(e.touches.length === 1 && isDragging) {
+      const t = e.touches[0];
+      const dx = t.clientX - dragStart.x, dy = t.clientY - dragStart.y;
+      const c = clampTransform(dragOrigin.x + dx, dragOrigin.y + dy, mapScale);
+      setTransform(c.x, c.y, mapScale);
+    } else if(e.touches.length === 2) {
+      const dist = pinchDist(e.touches);
+      if(lastPinchDist) {
+        const delta = dist / lastPinchDist;
+        const ns = Math.min(3, Math.max(0.3, mapScale * delta));
+        const rect = cont.getBoundingClientRect();
+        const mid = pinchMid(e.touches, rect);
+        const nx = mid.x - (mid.x - mapX) * (ns/mapScale);
+        const ny = mid.y - (mid.y - mapY) * (ns/mapScale);
+        const c = clampTransform(nx, ny, ns);
+        setTransform(c.x, c.y, ns);
+      }
+      lastPinchDist = dist;
+    }
+    e.preventDefault();
+  }, {passive:false});
+
+  cont.addEventListener('touchend', e => {
+    if(e.touches.length === 0) { isDragging = false; lastPinchDist = null; }
+    else if(e.touches.length === 1) {
+      isDragging = true;
+      dragStart = {x: e.touches[0].clientX, y: e.touches[0].clientY};
+      dragOrigin = {x: mapX, y: mapY};
+      lastPinchDist = null;
+    }
+  });
+
+  document.getElementById('btn-zoom-in').addEventListener('click', ()=>{
+    const ns = Math.min(3, mapScale * 1.25);
+    const cont2 = document.getElementById('map-container');
+    const cx = cont2.clientWidth/2, cy = cont2.clientHeight/2;
+    const nx = cx - (cx - mapX) * (ns/mapScale);
+    const ny = cy - (cy - mapY) * (ns/mapScale);
+    const c = clampTransform(nx,ny,ns);
+    setTransform(c.x,c.y,ns,true);
+  });
+  document.getElementById('btn-zoom-out').addEventListener('click', ()=>{
+    const ns = Math.max(0.3, mapScale * 0.8);
+    const cont2 = document.getElementById('map-container');
+    const cx = cont2.clientWidth/2, cy = cont2.clientHeight/2;
+    const nx = cx - (cx - mapX) * (ns/mapScale);
+    const ny = cy - (cy - mapY) * (ns/mapScale);
+    const c = clampTransform(nx,ny,ns);
+    setTransform(c.x,c.y,ns,true);
+  });
+  document.getElementById('btn-reset-zoom').addEventListener('click', fitMap);
+}
+
+function pinchDist(touches) {
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.sqrt(dx*dx + dy*dy);
+}
+function pinchMid(touches, rect) {
+  return {
+    x: ((touches[0].clientX + touches[1].clientX) / 2) - rect.left,
+    y: ((touches[0].clientY + touches[1].clientY) / 2) - rect.top,
+  };
+}
+
+// ── SVG RENDER ──────────────────────────────────────────────
+
+function buildSVG() {
+  const tLayer = document.getElementById('territories-layer');
+  const lLayer = document.getElementById('labels-layer');
+  tLayer.innerHTML = '';
+  lLayer.innerHTML = '';
+
+  for(const [id, td] of Object.entries(TERRITORIES_DATA)) {
+    const ts = state.territories[id];
+    const player = PLAYERS[ts.owner];
+    const cont = CONTINENTS[td.cont];
+    const hx = td.cx, hy = td.cy, hw = td.w, hh = td.h;
+    const rx = 6;
+
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('class','territory');
+    g.setAttribute('data-id', id);
+
+    const shadow = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    shadow.setAttribute('x', hx - hw/2 + 2); shadow.setAttribute('y', hy - hh/2 + 2);
+    shadow.setAttribute('width', hw); shadow.setAttribute('height', hh);
+    shadow.setAttribute('rx', rx);
+    shadow.setAttribute('fill','rgba(0,0,0,0.5)');
+    g.appendChild(shadow);
+
+    const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    rect.setAttribute('x', hx - hw/2); rect.setAttribute('y', hy - hh/2);
+    rect.setAttribute('width', hw); rect.setAttribute('height', hh);
+    rect.setAttribute('rx', rx);
+    rect.setAttribute('fill', player.dark);
+    rect.setAttribute('stroke', player.color);
+    g.appendChild(rect);
+
+    const strip = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    strip.setAttribute('x', hx - hw/2); strip.setAttribute('y', hy - hh/2);
+    strip.setAttribute('width', hw); strip.setAttribute('height', 4);
+    strip.setAttribute('rx', rx);
+    strip.setAttribute('fill', cont.color);
+    strip.setAttribute('opacity','0.7');
+    g.appendChild(strip);
+
+    tLayer.appendChild(g);
+
+    const lg = document.createElementNS('http://www.w3.org/2000/svg','g');
+    const nameEl = document.createElementNS('http://www.w3.org/2000/svg','text');
+    nameEl.setAttribute('class','terr-label');
+    nameEl.setAttribute('x', hx); nameEl.setAttribute('y', hy - 5);
+    const shortName = td.name.length > 10 ? td.name.substring(0,9)+'.' : td.name;
+    nameEl.textContent = shortName;
+    lg.appendChild(nameEl);
+
+    const tbg = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    tbg.setAttribute('class','troops-bg');
+    tbg.setAttribute('x', hx - 10); tbg.setAttribute('y', hy + 4);
+    tbg.setAttribute('width', 20); tbg.setAttribute('height', 14);
+    tbg.setAttribute('rx', 4); tbg.setAttribute('ry', 4);
+    lg.appendChild(tbg);
+
+    const troopEl = document.createElementNS('http://www.w3.org/2000/svg','text');
+    troopEl.setAttribute('class','terr-troops');
+    troopEl.setAttribute('x', hx); troopEl.setAttribute('y', hy + 11);
+    troopEl.setAttribute('data-troops', id);
+    troopEl.textContent = ts.troops;
+    lg.appendChild(troopEl);
+
+    lg.style.pointerEvents = 'none';
+    lLayer.appendChild(lg);
+
+    g.addEventListener('click', () => onTerritoryClick(id));
+    let touchMoved = false;
+    g.addEventListener('touchstart', () => { touchMoved = false; }, {passive:true});
+    g.addEventListener('touchmove', () => { touchMoved = true; }, {passive:true});
+    g.addEventListener('touchend', e => {
+      if(!touchMoved) { e.preventDefault(); onTerritoryClick(id); }
+    });
+  }
+  updateMapVisuals();
+}
+
+function updateMapVisuals() {
+  for(const [id] of Object.entries(TERRITORIES_DATA)) {
+    const ts = state.territories[id];
+    if(!ts) continue;
+    const player = PLAYERS[ts.owner];
+    const g = document.querySelector(`.territory[data-id="${id}"]`);
+    if(!g) continue;
+    const rects = g.querySelectorAll('rect');
+    if(rects[1]) {
+      rects[1].setAttribute('fill', player.dark);
+      rects[1].setAttribute('stroke', player.color);
+    }
+    g.classList.remove('selected','target');
+    if(id === state.selected) g.classList.add('selected');
+    if(id === state.target)   g.classList.add('target');
+    const troopEl = document.querySelector(`text[data-troops="${id}"]`);
+    if(troopEl) troopEl.textContent = ts.troops;
+  }
+}
+
+// ── GAME LOGIC ──────────────────────────────────────────────
+
+function calcReinforcements(playerId) {
+  const owned = Object.values(state.territories).filter(t => t.owner === playerId).length;
+  let bonus = Math.max(3, Math.floor(owned / 3));
+  for(const [cid, cont] of Object.entries(CONTINENTS)) {
+    const contTerrs = Object.entries(TERRITORIES_DATA).filter(([,v]) => v.cont === cid).map(([k]) => k);
+    if(contTerrs.every(id => state.territories[id].owner === playerId)) bonus += cont.bonus;
+  }
+  return bonus;
+}
+
+function isAlive(pid) {
+  return Object.values(state.territories).some(t => t.owner === pid);
+}
+
+function checkWin() {
+  const allOwners = [...new Set(Object.values(state.territories).map(t=>t.owner))];
+  if(allOwners.length === 1) {
+    const winner = PLAYERS[allOwners[0]];
+    gameOver = true;
+    // Partículas de victoria en todo el mapa
+    for(let i = 0; i < 5; i++) {
+      setTimeout(() => {
+        const x = 100 + Math.random() * 600;
+        const y = 50 + Math.random() * 350;
+        spawnParticles(x * mapScale + mapX, y * mapScale + mapY, '#ffdd44', 30);
+      }, i * 300);
+    }
+    showModal('🏆 VICTORIA', `${winner.name} ha conquistado el mundo!`);
+    return true;
+  }
+  return false;
+}
+
+function rollDice(n) {
+  return Array.from({length:n}, () => Math.floor(Math.random()*6)+1).sort((a,b)=>b-a);
+}
+
+// ── TERRITORY CLICK ──────────────────────────────────────────
+
+function onTerritoryClick(id) {
+  if(gameOver) return;
+  if(state.currentPlayer !== 0) { hint('Espera tu turno'); return; }
+  if(isAITurnRunning) { hint('La IA está pensando...'); return; }
+
+  const ts = state.territories[id];
+  if(!ts) return;
+
+  if(state.phase === 'reinforce') {
+    if(ts.owner !== 0) { hint('Solo puedes reforzar tus propios territorios'); return; }
+    if(state.reinforcementsLeft <= 0) { hint('No te quedan tropas para colocar'); return; }
+    ts.troops++;
+    state.reinforcementsLeft--;
+    animateTroopCount(id);
+    log(`Reforzado ${TERRITORIES_DATA[id].name}: +1 tropa`);
+    updateMapVisuals();
+    updateUI();
+    if(state.reinforcementsLeft === 0) hint('Refuerzo completo. Puedes atacar o pasar de fase');
+    return;
+  }
+
+  if(state.phase === 'attack') {
+    if(!state.selected) {
+      if(ts.owner !== 0) { hint('Selecciona uno de tus territorios para atacar'); return; }
+      if(ts.troops < 2)  { hint('Necesitas al menos 2 tropas para atacar'); return; }
+      state.selected = id;
+      state.target = null;
+      hint(`Selecciona objetivo desde ${TERRITORIES_DATA[id].name}`);
+      updateMapVisuals();
+      updateUI();
+      return;
+    } else {
+      if(id === state.selected) {
+        state.selected = null;
+        state.target = null;
+        hint('Selección cancelada');
+        updateMapVisuals();
+        updateUI();
+        return;
+      }
+      if(ts.owner === 0) {
+        state.selected = id;
+        state.target = null;
+        hint(`Seleccionado ${TERRITORIES_DATA[id].name}. Elige objetivo enemigo`);
+        updateMapVisuals();
+        updateUI();
+        return;
+      }
+      if(ADJACENCY[state.selected] && ADJACENCY[state.selected].includes(id)) {
+        state.target = id;
+        doAttack(state.selected, id);
+        return;
+      } else {
+        hint('Ese territorio no es adyacente al seleccionado');
+        return;
+      }
+    }
+  }
+
+  if(state.phase === 'fortify') {
+    if(!state.selected) {
+      if(ts.owner !== 0) { hint('Selecciona tu territorio de origen'); return; }
+      if(ts.troops < 2)  { hint('Necesitas al menos 2 tropas para mover'); return; }
+      state.selected = id;
+      hint(`Origen: ${TERRITORIES_DATA[id].name}. Elige destino amigo adyacente`);
+      updateMapVisuals();
+      updateUI();
+      return;
+    } else {
+      if(id === state.selected) {
+        state.selected = null;
+        hint('Selección cancelada');
+        updateMapVisuals();
+        updateUI();
+        return;
+      }
+      if(ts.owner === 0 && ADJACENCY[state.selected] && ADJACENCY[state.selected].includes(id)) {
+        showFortifySlider(state.selected, id);
+        return;
+      } else {
+        hint('Destino inválido (debe ser tuyo y adyacente)');
+        return;
+      }
+    }
+  }
+}
+
+// ── COMBAT ───────────────────────────────────────────────────
+
+function doAttack(atkId, defId) {
+  const atk = state.territories[atkId];
+  const def = state.territories[defId];
+
+  const atkDice = Math.min(3, atk.troops - 1);
+  const defDice = Math.min(2, def.troops);
+
+  const aRolls = rollDice(atkDice);
+  const dRolls = rollDice(defDice);
+
+  let atkLoss = 0, defLoss = 0;
+  const pairs = Math.min(atkDice, defDice);
+  for(let i=0;i<pairs;i++) {
+    if(aRolls[i] > dRolls[i]) defLoss++;
+    else atkLoss++;
+  }
+
+  // Mostrar dados con animación
+  showDice(aRolls, dRolls, atkLoss, defLoss);
+
+  // Aplicar pérdidas
+  atk.troops -= atkLoss;
+  def.troops -= defLoss;
+
+  const atkName = TERRITORIES_DATA[atkId].name;
+  const defName = TERRITORIES_DATA[defId].name;
+  log(`${atkName} [${aRolls.join(',')}] vs ${defName} [${dRolls.join(',')}] → ATK -${atkLoss} DEF -${defLoss}`, 'battle');
+
+  // Animar dados
+  setTimeout(() => animateDice(aRolls, 'atk'), 100);
+
+  if(def.troops <= 0) {
+    def.owner = 0;
+    def.troops = Math.min(atkDice, atk.troops - 1);
+    atk.troops -= def.troops;
+    if(atk.troops < 1) atk.troops = 1;
+    log(`⚔ Conquistado ${defName}!`, 'conquer');
+    
+    // Animaciones de conquista
+    animateConquest(defId);
+    animateTroops(atkId, defId, def.troops);
+    spawnParticles(
+      TERRITORIES_DATA[defId].cx * mapScale + mapX,
+      TERRITORIES_DATA[defId].cy * mapScale + mapY,
+      '#ffdd44', 30
+    );
+    
+    if(checkWin()) {
+      state.selected = null;
+      state.target = null;
+      updateMapVisuals();
+      updateUI();
+      return;
+    }
+  }
+
+  state.selected = null;
+  state.target = null;
+  updateMapVisuals();
+  updateUI();
+}
+
+function showDice(aRolls, dRolls, atkLoss, defLoss) {
+  const diceArea = document.getElementById('dice-area');
+  const diceVs   = document.getElementById('dice-vs');
+  diceArea.style.display = 'flex';
+  diceVs.style.display   = 'block';
+  diceArea.innerHTML = '';
+
+  aRolls.forEach((v,i) => {
+    const d = document.createElement('div');
+    const isWinner = i < (aRolls.length - (atkLoss>0?Math.max(0,atkLoss-(aRolls.length-dRolls.length)):0));
+    d.className = `die atk ${isWinner ? 'win' : 'lose'}`;
+    d.textContent = v;
+    d.style.animationDelay = (i * 0.1) + 's';
+    diceArea.appendChild(d);
+  });
+  
+  const vs = document.createElement('div');
+  vs.style.cssText = 'width:100%;text-align:center;font-size:10px;color:var(--dim);font-family:Cinzel,serif';
+  vs.textContent = '⚔ VS ⚔'; 
+  diceArea.appendChild(vs);
+  
+  dRolls.forEach((v,i) => {
+    const d = document.createElement('div');
+    const isWinner = i < (dRolls.length - (defLoss>0?Math.max(0,defLoss-(dRolls.length-aRolls.length)):0));
+    d.className = `die def ${isWinner ? 'win' : 'lose'}`;
+    d.textContent = v;
+    d.style.animationDelay = ((i + aRolls.length) * 0.1) + 's';
+    diceArea.appendChild(d);
+  });
+  
+  diceVs.textContent = `⚔ Ataque -${atkLoss}  |  Defensa -${defLoss}`;
+}
+
+// ── FORTIFY ──────────────────────────────────────────────────
+
+function showFortifySlider(fromId, toId) {
+  const fromTs = state.territories[fromId];
+  const maxMove = fromTs.troops - 1;
+  const slider = document.getElementById('troops-slider');
+  const sliderWrap = document.getElementById('troops-slider-wrap');
+  const sliderVal = document.getElementById('slider-val');
+  const sliderMax = document.getElementById('slider-max');
+
+  if(maxMove < 1) {
+    hint('No hay tropas suficientes para mover');
+    state.selected = null;
+    updateMapVisuals();
+    updateUI();
+    return;
+  }
+
+  slider.min = 1; 
+  slider.max = maxMove; 
+  slider.value = 1;
+  sliderVal.textContent = 1; 
+  sliderMax.textContent = maxMove;
+  sliderWrap.style.display = 'block';
+
+  pendingFortify = { from: fromId, to: toId };
+
+  const btn = document.getElementById('btn-action');
+  btn.textContent = `MOVER ${maxMove} TROPAS`;
+  btn.disabled = false;
+  btn.onclick = () => {
+    const n = parseInt(slider.value);
+    const from = state.territories[pendingFortify.from];
+    const to = state.territories[pendingFortify.to];
+    
+    if(from.troops <= n) {
+      hint('No puedes mover todas las tropas, deja al menos 1');
+      return;
+    }
+    
+    from.troops -= n;
+    to.troops += n;
+    
+    // Animación de movimiento
+    animateTroops(pendingFortify.from, pendingFortify.to, n);
+    animateTroopCount(pendingFortify.from);
+    animateTroopCount(pendingFortify.to);
+    
+    log(`Movidas ${n} tropas: ${TERRITORIES_DATA[pendingFortify.from].name} → ${TERRITORIES_DATA[pendingFortify.to].name}`);
+    sliderWrap.style.display = 'none';
+    pendingFortify = null;
+    state.selected = null;
+    state.target = null;
+    
+    btn.disabled = true;
+    btn.textContent = 'MOVIMIENTO COMPLETADO';
+    
+    updateMapVisuals();
+    updateUI();
+    endTurn();
+  };
+
+  slider.oninput = () => { 
+    sliderVal.textContent = slider.value;
+    const btn2 = document.getElementById('btn-action');
+    btn2.textContent = `MOVER ${slider.value} TROPAS`;
+  };
+
+  state.selected = fromId;
+  state.target = toId;
+  updateMapVisuals();
+  updateUI();
+}
+
+// ── PHASE MANAGEMENT ─────────────────────────────────────────
+
+function nextPhase() {
+  if(gameOver) return;
+  if(state.currentPlayer !== 0) return;
+
+  if(state.phase === 'reinforce') {
+    if(state.reinforcementsLeft > 0) {
+      hint(`Aún tienes ${state.reinforcementsLeft} tropas para colocar`);
+      return;
+    }
+    state.phase = 'attack';
+    state.selected = null;
+    state.target = null;
+    document.getElementById('dice-area').style.display='none';
+    document.getElementById('dice-vs').style.display='none';
+    log('--- FASE DE ATAQUE ---', 'system');
+    hint('Selecciona un territorio propio para atacar');
+    
+    // Animación de cambio de fase
+    document.getElementById('phase-badge').classList.add('pulse');
+    setTimeout(() => {
+      document.getElementById('phase-badge').classList.remove('pulse');
+    }, 800);
+    
+    updateUI();
+    updateMapVisuals();
+    return;
+  }
+
+  if(state.phase === 'attack') {
+    state.phase = 'fortify';
+    state.selected = null;
+    state.target = null;
+    log('--- FASE DE FORTIFICACIÓN ---', 'system');
+    hint('Selecciona origen para mover tropas');
+    
+    document.getElementById('phase-badge').classList.add('pulse');
+    setTimeout(() => {
+      document.getElementById('phase-badge').classList.remove('pulse');
+    }, 800);
+    
+    updateUI();
+    updateMapVisuals();
+    return;
+  }
+
+  if(state.phase === 'fortify') {
+    endTurn();
+  }
+}
+
+function endTurn() {
+  if(gameOver) return;
+  
+  document.getElementById('troops-slider-wrap').style.display='none';
+  document.getElementById('dice-area').style.display='none';
+  document.getElementById('dice-vs').style.display='none';
+  
+  const btn = document.getElementById('btn-action');
+  btn.disabled = true;
+  btn.textContent = 'SELECCIONA TERRITORIO';
+  btn.onclick = null;
+  
+  state.selected = null;
+  state.target = null;
+  pendingFortify = null;
+  
+  updateMapVisuals();
+  updateUI();
+
+  if(!isAlive(0)) {
+    showModal('💀 DERROTA', 'Has sido eliminado...');
+    gameOver = true;
+    return;
+  }
+
+  isAITurnRunning = true;
+  setTimeout(() => {
+    runAITurns();
+  }, 300);
+}
+
+// ── AI ───────────────────────────────────────────────────────
+
+function runAITurns() {
+  const aiPlayers = PLAYERS.filter(p => !p.isHuman && isAlive(p.id));
+  let delay = 0;
+
+  if(aiPlayers.length === 0) {
+    isAITurnRunning = false;
+    startHumanTurn();
+    return;
+  }
+
+  for(const player of aiPlayers) {
+    if(!isAlive(player.id)) continue;
+    delay += 600;
+    setTimeout(() => {
+      aiTurn(player.id);
+      const remaining = aiPlayers.filter(p => p.id > player.id && isAlive(p.id));
+      if(remaining.length === 0) {
+        setTimeout(() => {
+          isAITurnRunning = false;
+          if(!gameOver) startHumanTurn();
+        }, 400);
+      }
+    }, delay);
+  }
+}
+
+function aiTurn(pid) {
+  if(gameOver) return;
+  const owned = Object.entries(state.territories).filter(([,t]) => t.owner === pid);
+  if(owned.length === 0) return;
+
+  let reinforcements = calcReinforcements(pid);
+  const sorted = [...owned].sort(([,a],[,b]) => b.troops - a.troops);
+  const best = sorted[0];
+  state.territories[best[0]].troops += reinforcements;
+  
+  // Animar refuerzo de IA
+  animateTroopCount(best[0]);
+  log(`${PLAYERS[pid].name}: refuerza ${TERRITORIES_DATA[best[0]].name} +${reinforcements}`, 'ai');
+
+  let maxAttacks = aiDifficulty === 'easy' ? 2 : aiDifficulty === 'normal' ? 4 : 6;
+  let attacks = 0;
+
+  while(attacks < maxAttacks && !gameOver) {
+    const myTerrs = Object.entries(state.territories).filter(([,t]) => t.owner===pid && t.troops >= 3);
+    if(myTerrs.length === 0) break;
+
+    myTerrs.sort(([,a],[,b]) => b.troops - a.troops);
+    let attacked = false;
+
+    for(const [srcId, src] of myTerrs) {
+      if(src.troops < 3) continue;
+      const adj = ADJACENCY[srcId].filter(id => state.territories[id].owner !== pid && state.territories[id].owner !== -1);
+      if(adj.length === 0) continue;
+
+      adj.sort((a,b) => state.territories[a].troops - state.territories[b].troops);
+      const tgt = adj[0];
+      aiAttack(pid, srcId, tgt);
+      attacked = true;
+      attacks++;
+      break;
+    }
+
+    if(!attacked) break;
+    if(checkWin()) {
+      updateMapVisuals();
+      updateUI();
+      return;
+    }
+  }
+
+  updateMapVisuals();
+  updateUI();
+}
+
+function aiAttack(pid, atkId, defId) {
+  const atk = state.territories[atkId];
+  const def = state.territories[defId];
+  const atkDice = Math.min(3, atk.troops - 1);
+  const defDice = Math.min(2, def.troops);
+  const aRolls = rollDice(atkDice);
+  const dRolls = rollDice(defDice);
+  let atkLoss=0, defLoss=0;
+  for(let i=0;i<Math.min(atkDice,defDice);i++) {
+    if(aRolls[i]>dRolls[i]) defLoss++; else atkLoss++;
+  }
+  atk.troops -= atkLoss;
+  def.troops -= defLoss;
+
+  const defName = TERRITORIES_DATA[defId].name;
+  if(def.troops <= 0) {
+    def.owner = pid;
+    def.troops = Math.min(atkDice, atk.troops-1);
+    atk.troops -= def.troops;
+    if(atk.troops<1) atk.troops=1;
+    animateConquest(defId);
+    animateTroops(atkId, defId, def.troops);
+    log(`${PLAYERS[pid].name} conquista ${defName}`, 'ai');
+  }
+}
+
+function startHumanTurn() {
+  if(gameOver) return;
+  if(!isAlive(0)) {
+    showModal('💀 DERROTA', 'Has sido eliminado...');
+    gameOver = true;
+    return;
+  }
+
+  state.currentPlayer = 0;
+  state.phase = 'reinforce';
+  state.reinforcementsLeft = calcReinforcements(0);
+  state.selected = null;
+  state.target = null;
+  pendingFortify = null;
+  document.getElementById('dice-area').style.display='none';
+  document.getElementById('dice-vs').style.display='none';
+  document.getElementById('troops-slider-wrap').style.display='none';
+  
+  const btn = document.getElementById('btn-action');
+  btn.disabled = true;
+  btn.textContent = 'SELECCIONA TERRITORIO';
+  btn.onclick = null;
+  
+  log(`--- TU TURNO: +${state.reinforcementsLeft} tropas ---`, 'system');
+  hint(`Coloca ${state.reinforcementsLeft} tropas en tus territorios`);
+  
+  document.getElementById('phase-badge').classList.add('pulse');
+  setTimeout(() => {
+    document.getElementById('phase-badge').classList.remove('pulse');
+  }, 800);
+  
+  updateMapVisuals();
+  updateUI();
+  switchTab('actions');
+}
+
+// ── UI ───────────────────────────────────────────────────────
+
+function updateUI() {
+  if(gameOver) return;
+
+  const p = PLAYERS[state.currentPlayer];
+  document.getElementById('turn-info').textContent =
+    state.currentPlayer === 0
+    ? `Tu turno${state.phase==='reinforce' ? ` — +${state.reinforcementsLeft} tropas` : ''}`
+    : `Turno de ${p.name}...`;
+  const phaseNames = {reinforce:'REFUERZO', attack:'ATAQUE', fortify:'FORTIFICAR'};
+  document.getElementById('phase-badge').textContent = phaseNames[state.phase] || state.phase;
+
+  const btn = document.getElementById('btn-action');
+  const btnNext = document.getElementById('btn-next-phase');
+  const btnEnd  = document.getElementById('btn-end-turn');
+
+  if(state.phase === 'fortify' && pendingFortify) {
+    btnNext.style.display = 'none';
+    btnEnd.style.display = 'none';
+  } else if(state.phase === 'reinforce') {
+    btn.textContent = state.reinforcementsLeft > 0
+      ? `CLICK EN TUS TERRITORIOS (${state.reinforcementsLeft} restantes)`
+      : 'REFUERZO COMPLETO';
+    btn.disabled = true;
+    btnNext.textContent = 'PASAR A ATAQUE';
+    btnNext.style.display = 'block';
+    btnEnd.style.display = 'none';
+    document.getElementById('troops-slider-wrap').style.display='none';
+  } else if(state.phase === 'attack') {
+    if(!state.selected) {
+      btn.textContent = 'SELECCIONA ORIGEN';
+      btn.disabled = true;
+    } else {
+      btn.textContent = `ATACAR DESDE ${TERRITORIES_DATA[state.selected].name.toUpperCase()}`;
+      btn.disabled = true;
+    }
+    btnNext.textContent = 'PASAR A FORTIFICAR';
+    btnNext.style.display = 'block';
+    btnEnd.style.display = 'none';
+  } else if(state.phase === 'fortify' && !pendingFortify) {
+    if(!state.selected) {
+      btn.textContent = 'SELECCIONA ORIGEN';
+      btn.disabled = true;
+    } else {
+      btn.textContent = `SELECCIONA DESTINO`;
+      btn.disabled = true;
+    }
+    btnNext.style.display = 'none';
+    btnEnd.style.display = 'block';
+    btnEnd.textContent = 'TERMINAR TURNO SIN MOVER';
+  }
+
+  const descs = {
+    reinforce: 'Haz clic en tus territorios para agregar tropas',
+    attack: state.selected
+      ? `Origen: ${TERRITORIES_DATA[state.selected].name} — haz clic en enemigo adyacente`
+      : 'Haz clic en tu territorio para atacar desde ahí',
+    fortify: pendingFortify
+      ? `Moviendo de ${TERRITORIES_DATA[pendingFortify.from].name} a ${TERRITORIES_DATA[pendingFortify.to].name}`
+      : state.selected
+      ? `Origen: ${TERRITORIES_DATA[state.selected].name} — elige destino amigo adyacente`
+      : 'Mueve tropas entre territorios adyacentes propios',
+  };
+  document.getElementById('phase-desc').textContent = descs[state.phase] || '';
+
+  const selText = document.getElementById('sel-text');
+  if(state.selected) {
+    const t = TERRITORIES_DATA[state.selected];
+    selText.textContent = `${t.name} (${state.territories[state.selected].troops} tropas)`;
+  } else {
+    selText.textContent = 'Ninguno';
+  }
+
+  updateStatusTab();
+}
+
+function updateStatusTab() {
+  const ps = document.getElementById('player-stats');
+  ps.innerHTML = '<span class="label">JUGADORES</span>';
+  PLAYERS.forEach(p => {
+    const owned = Object.values(state.territories).filter(t=>t.owner===p.id).length;
+    const troops = Object.values(state.territories).filter(t=>t.owner===p.id).reduce((s,t)=>s+t.troops,0);
+    const row = document.createElement('div');
+    row.className = 'stat-row';
+    row.innerHTML = `<span style="color:${p.color}">${p.name}</span>
+      <span class="stat-val">${owned} terr. / ${troops} tropas</span>`;
+    ps.appendChild(row);
+  });
+
+  const cc = document.getElementById('continent-control');
+  cc.innerHTML = '<span class="label">CONTINENTES</span>';
+  for(const [cid, cont] of Object.entries(CONTINENTS)) {
+    const contTerrs = Object.entries(TERRITORIES_DATA).filter(([,v])=>v.cont===cid).map(([k])=>k);
+    const owners = [...new Set(contTerrs.map(id=>state.territories[id]?.owner).filter(o=>o!==-1))];
+    const row = document.createElement('div');
+    row.className = 'stat-row';
+    const ownerName = owners.length === 1 ? PLAYERS[owners[0]].name : 'Disputado';
+    const ownerColor = owners.length === 1 ? PLAYERS[owners[0]].color : 'var(--dim)';
+    row.innerHTML = `<span>${cont.name}</span>
+      <span style="color:${ownerColor};font-size:10px">+${cont.bonus} | ${ownerName}</span>`;
+    cc.appendChild(row);
+  }
+}
+
+function buildLegend() {
+  const leg = document.getElementById('legend');
+  leg.innerHTML = '<div style="font-family:Cinzel,serif;font-size:9px;letter-spacing:2px;color:var(--accent);padding:4px 0 8px">CONTINENTES</div>';
+  for(const [,cont] of Object.entries(CONTINENTS)) {
+    const item = document.createElement('div');
+    item.className = 'leg-item';
+    item.innerHTML = `<div class="leg-dot" style="background:${cont.color}"></div>
+      <span>${cont.name}</span>
+      <span class="leg-bonus">+${cont.bonus}</span>`;
+    leg.appendChild(item);
+  }
+  leg.innerHTML += '<div style="font-family:Cinzel,serif;font-size:9px;letter-spacing:2px;color:var(--accent);padding:12px 0 8px">JUGADORES</div>';
+  PLAYERS.forEach(p => {
+    const item = document.createElement('div');
+    item.className = 'leg-item';
+    item.innerHTML = `<div class="leg-dot" style="background:${p.color}"></div>
+      <span>${p.name}</span>
+      <span class="leg-bonus" style="color:${p.color}">${p.isHuman?'👤 Humano':'🤖 IA'}</span>`;
+    leg.appendChild(item);
+  });
+  leg.innerHTML += '<div style="font-family:Cinzel,serif;font-size:9px;letter-spacing:2px;color:var(--dim);padding:12px 0 8px">CONTROLES</div>';
+  ['Pellizco: zoom', 'Arrastrar: mover mapa', 'FIT: restablecer zoom', 'Click: seleccionar territorio'].forEach(t=>{
+    const d = document.createElement('div');
+    d.style.cssText='font-size:11px;padding:2px 0;color:var(--dim)';
+    d.textContent = t;
+    leg.appendChild(d);
+  });
+}
+
+function hint(msg) {
+  document.getElementById('hint-text').textContent = msg;
+}
+
+function log(msg, type='') {
+  const area = document.getElementById('log-area');
+  const el = document.createElement('div');
+  el.className = 'log-entry' + (type ? ' '+type : '');
+  el.textContent = msg;
+  area.appendChild(el);
+  area.scrollTop = area.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('log-area').innerHTML = '';
+}
+
+function showModal(title, body) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').textContent  = body;
+  document.getElementById('modal-overlay').style.display = 'flex';
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.ptab').forEach(t => t.classList.toggle('active', t.dataset.tab===name));
+  document.querySelectorAll('.panel-section').forEach(s => s.classList.toggle('active', s.id===`tab-${name}`));
+}
+
+// ── BOOT ─────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  setupMapControls();
+  setupGame();
+
+  document.querySelectorAll('.ptab').forEach(tab => {
+    tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+  });
+
+  document.getElementById('btn-next-phase').addEventListener('click', nextPhase);
+  document.getElementById('btn-end-turn').addEventListener('click', endTurn);
+  document.getElementById('modal-close').addEventListener('click', () => {
+    document.getElementById('modal-overlay').style.display='none';
+  });
+
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(fitMap, 250);
+  });
+});
+</script>
+</body>
+</html>
